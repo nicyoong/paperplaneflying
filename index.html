@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paper Drift | 2.5D Flight</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #e0f2f1; font-family: 'Segoe UI', sans-serif; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #37474f; pointer-events: none; }
+        .stat-bar { width: 200px; height: 4px; background: rgba(0,0,0,0.1); margin: 5px 0; }
+        .stat-fill { height: 100%; background: #26a69a; transition: width 0.1s; }
+        #stall-warning { 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #ff5252; font-weight: bold; font-size: 2rem; opacity: 0; transition: opacity 0.2s;
+        }
+        #instructions { position: absolute; bottom: 20px; width: 100%; text-align: center; color: #546e7a; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div style="font-weight: bold; margin-bottom: 10px;">FLIGHT DATA</div>
+        Speed: <div class="stat-bar"><div id="speed-fill" class="stat-fill"></div></div>
+        Altitude: <div class="stat-bar"><div id="alt-fill" class="stat-fill"></div></div>
+    </div>
+    <div id="stall-warning">STALL</div>
+    <div id="instructions">Use UP / DOWN or MOUSE to glide. Catch the blue thermals to climb.</div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- CONFIGURATION & STATS ---
+        const CONFIG = {
+            gravity: 0.005,
+            airDensity: 0.1,
+            autoLeveling: 0.02, // Assist system
+            dragBase: 0.01,
+            liftCoefficient: 0.5
+        };
+
+        const planeStats = {
+            wingspan: 1.2,
+            weight: 1.0,
+            stiffness: 0.08,
+            foldSharpness: 0.95 // 1.0 = perfect glide
+        };
+
+        // --- INITIALIZATION ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xe0f7fa);
+        scene.fog = new THREE.Fog(0xe0f7fa, 20, 100);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+        const sun = new THREE.DirectionalLight(0xffffff, 0.5);
+        sun.position.set(10, 20, 10);
+        scene.add(sun);
+
+        // --- THE PLANE MODEL ---
+        const planeGroup = new THREE.Group();
+        const paperMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+        
+        // Simple Origami Shape
+        const bodyGeom = new THREE.BufferGeometry();
+        const vertices = new Float32Array([
+            0, 0, 0,      -1, 0.1, 0.3,   0.5, 0, 0,   // Wing Left
+            0, 0, 0,      -1, 0.1, -0.3,  0.5, 0, 0,   // Wing Right
+            0, 0, 0,      -0.8, -0.2, 0,  0.5, 0, 0    // Keel
+        ]);
+        bodyGeom.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+        const bodyMesh = new THREE.Mesh(bodyGeom, paperMaterial);
+        planeGroup.add(bodyMesh);
+        scene.add(planeGroup);
+
+        // --- WORLD OBJECTS (Clouds/Wind) ---
+        const clouds = [];
+        const thermals = [];
+        function createWorld() {
+            // Add a stylized ground grid
+            const grid = new THREE.GridHelper(2000, 100, 0x80deea, 0xb2ebf2);
+            grid.position.y = -10;
+            scene.add(grid);
+
+            // Add some "Thermal" zones (Vertical Wind)
+            for(let i = 0; i < 20; i++) {
+                const geom = new THREE.CylinderGeometry(2, 2, 20, 12);
+                const mat = new THREE.MeshBasicMaterial({ color: 0x00bcd4, transparent: true, opacity: 0.1, wireframe: true });
+                const thermal = new THREE.Mesh(geom, mat);
+                thermal.position.set(Math.random() * 500, 0, (Math.random() - 0.5) * 10);
+                scene.add(thermal);
+                thermals.push(thermal);
+            }
+        }
+        createWorld();
+
+        // --- PHYSICS STATE ---
+        let state = {
+            pos: new THREE.Vector3(0, 10, 0),
+            vel: new THREE.Vector3(0.1, 0, 0),
+            pitch: 0,
+            targetPitch: 0,
+            stallAmount: 0
+        };
+
+        const input = { up: false, down: false };
+        window.addEventListener('keydown', e => {
+            if (e.key === 'ArrowUp') input.up = true;
+            if (e.key === 'ArrowDown') input.down = true;
+        });
+        window.addEventListener('keyup', e => {
+            if (e.key === 'ArrowUp') input.up = false;
+            if (e.key === 'ArrowDown') input.down = false;
+        });
+
+        // --- PHYSICS LOOP ---
+        function updatePhysics() {
+            // 1. Handle Input
+            if (input.up) state.targetPitch += planeStats.stiffness;
+            if (input.down) state.targetPitch -= planeStats.stiffness;
+            
+            // Smoothen pitch towards target
+            state.pitch += (state.targetPitch - state.pitch) * 0.1;
+            state.targetPitch *= 0.95; // Return to neutral
+
+            // 2. Calculate Flight Vectors
+            const heading = new THREE.Vector3(Math.cos(state.pitch), Math.sin(state.pitch), 0);
+            const speed = state.vel.length();
+            const velocityDir = state.vel.clone().normalize();
+            
+            // Angle of Attack (AoA)
+            // Dot product gives us the cosine of the angle between where we look and where we move
+            let aoa = state.pitch - Math.atan2(state.vel.y, state.vel.x);
+            
+            // 3. Lift Calculation
+            // Lift is max at ~15 degrees (0.26 rads), then drops off (stall)
+            let liftMag = Math.sin(aoa * 2) * speed * speed * CONFIG.liftCoefficient * planeStats.wingspan;
+            if (Math.abs(aoa) > 0.4) { // Stall threshold
+                liftMag *= 0.2; 
+                state.stallAmount = THREE.MathUtils.lerp(state.stallAmount, 1, 0.1);
+            } else {
+                state.stallAmount = THREE.MathUtils.lerp(state.stallAmount, 0, 0.1);
+            }
+            
+            const liftVec = new THREE.Vector3(-velocityDir.y, velocityDir.x, 0).multiplyScalar(liftMag);
+
+            // 4. Drag Calculation
+            const dragMag = (CONFIG.dragBase + Math.abs(aoa) * 0.5) * speed * speed * (2.0 - planeStats.foldSharpness);
+            const dragVec = velocityDir.clone().multiplyScalar(-dragMag);
+
+            // 5. Gravity
+            const gravityVec = new THREE.Vector3(0, -CONFIG.gravity * planeStats.weight, 0);
+
+            // 6. Wind / Thermals
+            let windVec = new THREE.Vector3(0, 0, 0);
+            thermals.forEach(t => {
+                const dist = state.pos.distanceTo(t.position);
+                if (dist < 5) {
+                    windVec.y += 0.01; // Vertical lift from thermal
+                }
+            });
+
+            // 7. Sum Forces & Update State
+            const acceleration = new THREE.Vector3()
+                .add(liftVec)
+                .add(dragVec)
+                .add(gravityVec)
+                .add(windVec);
+
+            state.vel.add(acceleration);
+            
+            // Speed Cap for stability
+            if (state.vel.length() > 0.8) state.vel.setLength(0.8);
+            
+            state.pos.add(state.vel);
+
+            // 8. Auto-Stabilization (Assist)
+            // Pulls the pitch toward the velocity vector (Weather-vaning)
+            const targetStabilize = Math.atan2(state.vel.y, state.vel.x);
+            state.pitch += (targetStabilize - state.pitch) * CONFIG.autoLeveling;
+
+            // Update Mesh
+            planeGroup.position.copy(state.pos);
+            planeGroup.rotation.z = state.pitch;
+            // Visual banking based on horizontal speed (subtle 3D effect)
+            planeGroup.rotation.x = state.vel.y * 0.5; 
+            planeGroup.rotation.y = -0.2; 
+        }
+
+        // --- ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            updatePhysics();
+
+            // Camera follow (Smooth lerp)
+            const camTarget = new THREE.Vector3(state.pos.x - 5, state.pos.y + 2, 10);
+            camera.position.lerp(camTarget, 0.05);
+            camera.lookAt(state.pos.x + 2, state.pos.y, 0);
+
+            // UI Updates
+            document.getElementById('speed-fill').style.width = (state.vel.length() * 200) + "px";
+            document.getElementById('alt-fill').style.width = Math.max(0, state.pos.y * 10) + "px";
+            document.getElementById('stall-warning').style.opacity = state.stallAmount;
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
