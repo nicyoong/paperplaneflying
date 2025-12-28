@@ -169,10 +169,10 @@
 
         // --- PHYSICS LOOP ---
         function updatePhysics() {
+            const dt = Math.min(clock.getDelta(), 0.033);
             if (!state.flightActive) {
                 state.flightActive = true;
             }
-            const dt = Math.min(clock.getDelta(), 0.033);
             if (state.flightActive) {
                 state.flightTime += dt;
             }
@@ -312,7 +312,6 @@
             requestAnimationFrame(animate);
             
             updatePhysics();
-
             // Camera follow (Smooth lerp)
             const camTarget = new THREE.Vector3(state.pos.x - 5, state.pos.y + 2, 10);
             camera.position.lerp(camTarget, 0.05);
