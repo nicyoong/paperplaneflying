@@ -13,6 +13,9 @@
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             color: #ff5252; font-weight: bold; font-size: 2rem; opacity: 0; transition: opacity 0.2s;
         }
+        #jet-fill {
+            background: #ff9800;
+        }
         #instructions { position: absolute; bottom: 20px; width: 100%; text-align: center; color: #546e7a; }
     </style>
 </head>
@@ -21,6 +24,12 @@
         <div style="font-weight: bold; margin-bottom: 10px;">FLIGHT DATA</div>
         Speed: <div class="stat-bar"><div id="speed-fill" class="stat-fill"></div></div>
         Altitude: <div class="stat-bar"><div id="alt-fill" class="stat-fill"></div></div>
+        <div style="margin-top:10px;">
+            Jet Fuel
+            <div class="stat-bar">
+                <div id="jet-fill" class="stat-fill"></div>
+            </div>
+        </div>
     </div>
     <div id="stall-warning">STALL</div>
     <div id="instructions">Use UP / DOWN or MOUSE to glide. Catch the blue thermals to climb.</div>
@@ -137,9 +146,8 @@
             if (e.key === 'ArrowDown' || e.key === 's') input.down = true;
             if (e.key === 'ArrowLeft' || e.key === 'a') input.left = true;
             if (e.key === 'ArrowRight' || e.key === 'd') input.right = true;
-            if (e.code === 'Space' && !state.jetActive) {
+            if (e.code === 'Space' && state.jetTime > 0) {
                 state.jetActive = true;
-                state.jetTime = CONFIG.jetDuration;
             }
             if (e.key === 'r' || e.key === 'R') resetGame();
         });
@@ -148,6 +156,9 @@
             if (e.key === 'ArrowDown' || e.key === 's') input.down = false;
             if (e.key === 'ArrowLeft' || e.key === 'a') input.left = false;
             if (e.key === 'ArrowRight' || e.key === 'd') input.right = false;
+            if (e.code === 'Space') {
+                state.jetActive = false;
+            }
         });
 
         // --- PHYSICS LOOP ---
@@ -173,25 +184,21 @@
             const heading = new THREE.Vector3(Math.cos(state.pitch), Math.sin(state.pitch), 0);
             const speed = state.vel.length();
             // --- JET MODE ---
-            if (state.jetActive) {
-                state.jetTime -= dt;
+            if (state.jetActive && state.jetTime > 0) {
+                // Drain fuel
+                state.jetTime = Math.max(
+                    0,
+                    state.jetTime - CONFIG.jetFuelDrain * dt
+                );
 
-                // Continuous forward thrust
                 const forward = state.vel.clone().normalize();
                 state.vel.add(forward.multiplyScalar(CONFIG.jetThrust));
 
-                // Jet-enhanced lift
-                const jetLift = CONFIG.jetLiftBonus * speed * 0.01;
-                state.vel.y += jetLift;
+                // Slight jet-assisted lift
+                state.vel.y += CONFIG.jetLiftBonus * dt;
 
-                // Reduce gravity while jetting
-                state.vel.y += CONFIG.gravity * planeStats.weight * (1 - CONFIG.jetGravityFactor);
-
-                // Jet ends after duration
-                if (state.jetTime <= 0) {
-                    state.jetActive = false;
-                    state.jetTime = 0;
-                }
+            } else {
+                state.jetActive = false;
             }
             const velocityDir = state.vel.clone().normalize();
 
@@ -275,6 +282,8 @@
 
             state.stallAmount = 0;
             state.boostTimer = 0;
+            state.jetTime = CONFIG.jetDuration;
+            state.jetActive = false;
 
             // Clear visual transforms
             planeGroup.rotation.set(0, 0, 0);
@@ -302,6 +311,11 @@
                 new THREE.Vector3(jetScale, jetScale, jetScale),
                 0.15
             );
+            const jetRatio = state.jetTime / CONFIG.jetDuration;
+            document.getElementById('jet-fill').style.width =
+                (jetRatio * 200) + "px";
+            document.getElementById('jet-fill').style.background =
+                jetRatio > 0.2 ? "#ff9800" : "#e53935";
             renderer.render(scene, camera);
         }
 
