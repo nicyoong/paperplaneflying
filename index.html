@@ -21,6 +21,9 @@
 </head>
 <body>
     <div id="ui">
+        <div style="margin-top:10px;">
+            Flight Time: <span id="time">0.00</span>s
+        </div>
         <div style="font-weight: bold; margin-bottom: 10px;">FLIGHT DATA</div>
         Speed: <div class="stat-bar"><div id="speed-fill" class="stat-fill"></div></div>
         Altitude: <div class="stat-bar"><div id="alt-fill" class="stat-fill"></div></div>
@@ -64,6 +67,7 @@
             stiffness: 0.08,
             foldSharpness: 0.95 // 1.0 = perfect glide
         };
+        const FLOOR_Y = -10;
 
         // --- INITIALIZATION ---
         const scene = new THREE.Scene();
@@ -131,7 +135,9 @@
             stallAmount: 0,
             boostTimer: 0,
             jetTime: CONFIG.jetDuration,
-            jetActive: false
+            jetActive: false,
+            flightTime: 0,
+            flightActive: false
         };
         const SPAWN = {
             pos: new THREE.Vector3(0, 10, 0),
@@ -163,7 +169,13 @@
 
         // --- PHYSICS LOOP ---
         function updatePhysics() {
+            if (!state.flightActive) {
+                state.flightActive = true;
+            }
             const dt = Math.min(clock.getDelta(), 0.033);
+            if (state.flightActive) {
+                state.flightTime += dt;
+            }
             // 1. Handle Input
             if (input.up) state.targetPitch += planeStats.stiffness;
             if (input.down) state.targetPitch -= planeStats.stiffness;
@@ -269,6 +281,9 @@
             planeGroup.rotation.z = state.pitch;
             planeGroup.rotation.x = -state.yaw * 1.2; // bank
             planeGroup.rotation.y = -0.2;
+            if (state.flightActive && state.pos.y <= FLOOR_Y) {
+                state.flightActive = false;
+            }
         }
         function resetGame() {
             state.pos.copy(SPAWN.pos);
@@ -288,6 +303,8 @@
             // Clear visual transforms
             planeGroup.rotation.set(0, 0, 0);
             planeGroup.scale.set(1, 1, 1);
+            state.flightTime = 0;
+            state.flightActive = false;
         }
 
         // --- ANIMATION LOOP ---
@@ -316,6 +333,8 @@
                 (jetRatio * 200) + "px";
             document.getElementById('jet-fill').style.background =
                 jetRatio > 0.2 ? "#ff9800" : "#e53935";
+            document.getElementById('time').textContent =
+                state.flightTime.toFixed(2);
             renderer.render(scene, camera);
         }
 
