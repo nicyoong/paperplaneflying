@@ -38,7 +38,14 @@
             airDensity: 0.1,
             autoLeveling: 0.02, // Assist system
             dragBase: 0.01,
-            liftCoefficient: 0.5
+            liftCoefficient: 0.5,
+            boostImpulse: 0.18,
+            boostCooldown: 0.6,
+            boostDragPenalty: 0.04,
+            jetThrust: 0.015,
+            jetLiftBonus: 0.6,
+            jetGravityFactor: 0.4, // reduces gravity
+            jetDuration: 5.0
         };
 
         const planeStats = {
@@ -111,21 +118,31 @@
             targetPitch: 0,
             yaw: 0,
             targetYaw: 0,
-            stallAmount: 0
+            stallAmount: 0,
+            boostTimer: 0
+        };
+        const SPAWN = {
+            pos: new THREE.Vector3(0, 10, 0),
+            vel: new THREE.Vector3(0.12, 0, 0),
+            pitch: 0,
+            yaw: 0
         };
 
-        const input = { up: false, down: false, left: false, right: false };
+        const input = { up: false, down: false, left: false, right: false, boost: false };
         window.addEventListener('keydown', e => {
             if (e.key === 'ArrowUp' || e.key === 'w') input.up = true;
             if (e.key === 'ArrowDown' || e.key === 's') input.down = true;
             if (e.key === 'ArrowLeft' || e.key === 'a') input.left = true;
             if (e.key === 'ArrowRight' || e.key === 'd') input.right = true;
+            if (e.code === 'Space') input.boost = true;
+            if (e.key === 'r' || e.key === 'R') resetGame();
         });
         window.addEventListener('keyup', e => {
             if (e.key === 'ArrowUp' || e.key === 'w') input.up = false;
             if (e.key === 'ArrowDown' || e.key === 's') input.down = false;
             if (e.key === 'ArrowLeft' || e.key === 'a') input.left = false;
             if (e.key === 'ArrowRight' || e.key === 'd') input.right = false;
+            if (e.code === 'Space') input.boost = false;
         });
 
         // --- PHYSICS LOOP ---
@@ -150,6 +167,19 @@
             // 2. Calculate Flight Vectors
             const heading = new THREE.Vector3(Math.cos(state.pitch), Math.sin(state.pitch), 0);
             const speed = state.vel.length();
+            // Boost cooldown timer
+            state.boostTimer = Math.max(0, state.boostTimer - dt);
+
+            // Boost impulse (paper flick)
+            if (input.boost && state.boostTimer === 0 && state.stallAmount < 0.5) {
+                const forward = state.vel.clone().normalize();
+                state.vel.add(forward.multiplyScalar(CONFIG.boostImpulse));
+
+                // Boost costs efficiency
+                state.vel.multiplyScalar(1 - CONFIG.boostDragPenalty);
+
+                state.boostTimer = CONFIG.boostCooldown;
+            }
             const velocityDir = state.vel.clone().normalize();
 
             // Steering: gently rotate velocity vector
@@ -220,6 +250,23 @@
             planeGroup.rotation.x = -state.yaw * 1.2; // bank
             planeGroup.rotation.y = -0.2;
         }
+        function resetGame() {
+            state.pos.copy(SPAWN.pos);
+            state.vel.copy(SPAWN.vel);
+
+            state.pitch = SPAWN.pitch;
+            state.targetPitch = SPAWN.pitch;
+
+            state.yaw = SPAWN.yaw;
+            state.targetYaw = SPAWN.yaw;
+
+            state.stallAmount = 0;
+            state.boostTimer = 0;
+
+            // Clear visual transforms
+            planeGroup.rotation.set(0, 0, 0);
+            planeGroup.scale.set(1, 1, 1);
+        }
 
         // --- ANIMATION LOOP ---
         function animate() {
@@ -237,6 +284,11 @@
             document.getElementById('alt-fill').style.width = Math.max(0, state.pos.y * 10) + "px";
             document.getElementById('stall-warning').style.opacity = state.stallAmount;
 
+            const boostScale = input.boost ? 1.03 : 1.0;
+            planeGroup.scale.lerp(
+                new THREE.Vector3(boostScale, boostScale, boostScale),
+                0.2
+            );
             renderer.render(scene, camera);
         }
 
