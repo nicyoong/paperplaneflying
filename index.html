@@ -50,6 +50,7 @@
 
         // --- INITIALIZATION ---
         const scene = new THREE.Scene();
+        const clock = new THREE.Clock();
         scene.background = new THREE.Color(0xe0f7fa);
         scene.fog = new THREE.Fog(0xe0f7fa, 20, 100);
 
@@ -123,6 +124,7 @@
 
         // --- PHYSICS LOOP ---
         function updatePhysics() {
+            const dt = Math.min(clock.getDelta(), 0.033);
             // 1. Handle Input
             if (input.up) state.targetPitch += planeStats.stiffness;
             if (input.down) state.targetPitch -= planeStats.stiffness;
@@ -163,9 +165,8 @@
             let windVec = new THREE.Vector3(0, 0, 0);
             thermals.forEach(t => {
                 const dist = state.pos.distanceTo(t.position);
-                if (dist < 5) {
-                    windVec.y += 0.01; // Vertical lift from thermal
-                }
+                const strength = Math.max(0, 1 - dist / 5);
+                windVec.y += strength * strength * 0.02;
             });
 
             // 7. Sum Forces & Update State
@@ -175,12 +176,9 @@
                 .add(gravityVec)
                 .add(windVec);
 
-            state.vel.add(acceleration);
-            
-            // Speed Cap for stability
+            state.vel.add(acceleration.multiplyScalar(dt * 60));
             if (state.vel.length() > 0.8) state.vel.setLength(0.8);
-            
-            state.pos.add(state.vel);
+            state.pos.add(state.vel.clone().multiplyScalar(dt * 60));
 
             // 8. Auto-Stabilization (Assist)
             // Pulls the pitch toward the velocity vector (Weather-vaning)
