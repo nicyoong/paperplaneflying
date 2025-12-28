@@ -45,7 +45,8 @@
             jetThrust: 0.015,
             jetLiftBonus: 0.6,
             jetGravityFactor: 0.4, // reduces gravity
-            jetDuration: 5.0
+            jetDuration: 7.0,
+            jetFuelDrain: 1.0 
         };
 
         const planeStats = {
@@ -119,7 +120,9 @@
             yaw: 0,
             targetYaw: 0,
             stallAmount: 0,
-            boostTimer: 0
+            boostTimer: 0,
+            jetTime: CONFIG.jetDuration,
+            jetActive: false
         };
         const SPAWN = {
             pos: new THREE.Vector3(0, 10, 0),
@@ -134,7 +137,10 @@
             if (e.key === 'ArrowDown' || e.key === 's') input.down = true;
             if (e.key === 'ArrowLeft' || e.key === 'a') input.left = true;
             if (e.key === 'ArrowRight' || e.key === 'd') input.right = true;
-            if (e.code === 'Space') input.boost = true;
+            if (e.code === 'Space' && !state.jetActive) {
+                state.jetActive = true;
+                state.jetTime = CONFIG.jetDuration;
+            }
             if (e.key === 'r' || e.key === 'R') resetGame();
         });
         window.addEventListener('keyup', e => {
@@ -142,7 +148,6 @@
             if (e.key === 'ArrowDown' || e.key === 's') input.down = false;
             if (e.key === 'ArrowLeft' || e.key === 'a') input.left = false;
             if (e.key === 'ArrowRight' || e.key === 'd') input.right = false;
-            if (e.code === 'Space') input.boost = false;
         });
 
         // --- PHYSICS LOOP ---
@@ -167,18 +172,26 @@
             // 2. Calculate Flight Vectors
             const heading = new THREE.Vector3(Math.cos(state.pitch), Math.sin(state.pitch), 0);
             const speed = state.vel.length();
-            // Boost cooldown timer
-            state.boostTimer = Math.max(0, state.boostTimer - dt);
+            // --- JET MODE ---
+            if (state.jetActive) {
+                state.jetTime -= dt;
 
-            // Boost impulse (paper flick)
-            if (input.boost && state.boostTimer === 0 && state.stallAmount < 0.5) {
+                // Continuous forward thrust
                 const forward = state.vel.clone().normalize();
-                state.vel.add(forward.multiplyScalar(CONFIG.boostImpulse));
+                state.vel.add(forward.multiplyScalar(CONFIG.jetThrust));
 
-                // Boost costs efficiency
-                state.vel.multiplyScalar(1 - CONFIG.boostDragPenalty);
+                // Jet-enhanced lift
+                const jetLift = CONFIG.jetLiftBonus * speed * 0.01;
+                state.vel.y += jetLift;
 
-                state.boostTimer = CONFIG.boostCooldown;
+                // Reduce gravity while jetting
+                state.vel.y += CONFIG.gravity * planeStats.weight * (1 - CONFIG.jetGravityFactor);
+
+                // Jet ends after duration
+                if (state.jetTime <= 0) {
+                    state.jetActive = false;
+                    state.jetTime = 0;
+                }
             }
             const velocityDir = state.vel.clone().normalize();
 
@@ -284,10 +297,10 @@
             document.getElementById('alt-fill').style.width = Math.max(0, state.pos.y * 10) + "px";
             document.getElementById('stall-warning').style.opacity = state.stallAmount;
 
-            const boostScale = input.boost ? 1.03 : 1.0;
+            const jetScale = state.jetActive ? 1.06 : 1.0;
             planeGroup.scale.lerp(
-                new THREE.Vector3(boostScale, boostScale, boostScale),
-                0.2
+                new THREE.Vector3(jetScale, jetScale, jetScale),
+                0.15
             );
             renderer.render(scene, camera);
         }
