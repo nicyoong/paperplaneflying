@@ -217,9 +217,8 @@
             // Update Mesh
             planeGroup.position.copy(state.pos);
             planeGroup.rotation.z = state.pitch;
-            // Visual banking based on horizontal speed (subtle 3D effect)
-            planeGroup.rotation.x = state.vel.y * 0.5; 
-            planeGroup.rotation.y = -0.2; 
+            planeGroup.rotation.x = -state.yaw * 1.2; // bank
+            planeGroup.rotation.y = -0.2;
         }
 
         // --- ANIMATION LOOP ---
@@ -231,7 +230,7 @@
             // Camera follow (Smooth lerp)
             const camTarget = new THREE.Vector3(state.pos.x - 5, state.pos.y + 2, 10);
             camera.position.lerp(camTarget, 0.05);
-            camera.lookAt(state.pos.x + 2, state.pos.y, 0);
+            camera.lookAt(state.pos.x + 2, state.pos.y, state.pos.z);
 
             // UI Updates
             document.getElementById('speed-fill').style.width = (state.vel.length() * 200) + "px";
